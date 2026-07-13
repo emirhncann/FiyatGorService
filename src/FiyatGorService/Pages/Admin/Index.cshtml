@@ -1,0 +1,238 @@
+@page "/admin"
+@model FiyatGorService.Pages.Admin.IndexModel
+@{
+    ViewData["Title"] = "FiyatGor Admin";
+}
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FiyatGor Admin</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fb; color: #1f2937; }
+        .wrap { max-width: 960px; margin: 0 auto; padding: 24px; }
+        .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 8px 30px rgba(0,0,0,.08); margin-bottom: 20px; }
+        h1, h2 { margin-top: 0; }
+        .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+        .full { grid-column: 1 / -1; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; }
+        input, textarea, select, button { width: 100%; box-sizing: border-box; font: inherit; }
+        input, textarea { padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
+        textarea { min-height: 160px; resize: vertical; }
+        button { border: 0; border-radius: 8px; padding: 11px 14px; font-weight: 700; cursor: pointer; }
+        .primary { background: #2563eb; color: #fff; }
+        .secondary { background: #e2e8f0; color: #0f172a; }
+        .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+        .actions button { width: auto; min-width: 180px; }
+        .status { margin-top: 12px; padding: 12px; border-radius: 8px; display: none; }
+        .status.ok { display: block; background: #dcfce7; color: #166534; }
+        .status.error { display: block; background: #fee2e2; color: #991b1b; }
+        .logo-preview { width: 80px; height: 80px; object-fit: contain; display: block; margin-bottom: 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
+        .logo-upload { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
+        .hint { color: #475569; font-size: 14px; }
+        @@media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="card">
+            <h1>FiyatGor Yonetim Paneli</h1>
+            <p class="hint">SQL baglantisi, sorgu, port ve logo ayarlarini bu ekrandan yonetebilirsiniz.</p>
+        </div>
+
+        <div class="card">
+            <h2>Servis Ayarlari</h2>
+            <div class="logo-upload">
+                <label>Mevcut Logo</label>
+                <img id="logoPreview" class="logo-preview" alt="Logo onizleme" style="display:none;" />
+                <label for="logoFile">Logo Yukle</label>
+                <input id="logoFile" type="file" accept="image/png,image/jpeg" />
+                <div class="actions" style="margin-top: 12px;">
+                    <button id="upload-logo" type="button" class="primary">Logoyu Yukle</button>
+                </div>
+                <div id="logo-status" class="status"></div>
+            </div>
+            <form id="settings-form" class="grid">
+                <div>
+                    <label for="sqlServer">SQL Server</label>
+                    <input id="sqlServer" name="sqlServer" autocomplete="off" />
+                </div>
+                <div>
+                    <label for="database">Veritabani</label>
+                    <input id="database" name="database" autocomplete="off" />
+                </div>
+                <div>
+                    <label for="username">Kullanici</label>
+                    <input id="username" name="username" autocomplete="off" />
+                </div>
+                <div>
+                    <label for="password">Sifre</label>
+                    <input id="password" name="password" type="password" autocomplete="new-password" />
+                </div>
+                <div>
+                    <label for="port">Port</label>
+                    <input id="port" name="port" type="number" min="1" max="65535" />
+                </div>
+                <div class="full">
+                    <label for="priceQuery">PriceQuery</label>
+                    <textarea id="priceQuery" name="priceQuery"></textarea>
+                    <p class="hint" style="margin-top: 8px;">
+                        BARKOD, URUNADI, FIYAT, BIRIM, URUNRESIM disindaki tum sorgu kolonlari otomatik olarak tablet ekraninda ek bilgi olarak gosterilir.
+                        Ayrica tabletten gonderilen her ekstra URL parametresi (ornegin ?sube=0001) otomatik olarak ayni isimle (@@sube) bir SQL parametresi haline gelir, sorgunda diledigin gibi kullanabilirsin.
+                        Urun resmi icin URUNRESIM (ve istege bagli URUNRESIMTIPI) alias'larini kullan; servis tam data URI olarak productImage alanina yazar.
+                    </p>
+                </div>
+            </form>
+            <div class="actions">
+                <button id="test-connection" type="button" class="secondary">Baglantiyi Test Et</button>
+                <button id="save-settings" type="button" class="primary">Kaydet</button>
+            </div>
+            <div id="settings-status" class="status"></div>
+        </div>
+    </div>
+
+    <script>
+        const settingsStatus = document.getElementById("settings-status");
+        const logoStatus = document.getElementById("logo-status");
+        const logoPreview = document.getElementById("logoPreview");
+        const maxLogoSizeBytes = 10 * 1024 * 1024;
+
+        function setLogoPreview(logoBase64, logoContentType) {
+            if (logoBase64 && logoContentType) {
+                logoPreview.src = `data:${logoContentType};base64,${logoBase64}`;
+                logoPreview.style.display = "block";
+                return;
+            }
+
+            logoPreview.removeAttribute("src");
+            logoPreview.style.display = "none";
+        }
+
+        function setStatus(element, ok, message) {
+            element.className = ok ? "status ok" : "status error";
+            element.textContent = message;
+        }
+
+        function clearStatus(element) {
+            element.className = "status";
+            element.textContent = "";
+        }
+
+        function collectForm(confirmPortChange) {
+            return {
+                sqlServer: document.getElementById("sqlServer").value,
+                database: document.getElementById("database").value,
+                username: document.getElementById("username").value,
+                password: document.getElementById("password").value,
+                priceQuery: document.getElementById("priceQuery").value,
+                port: parseInt(document.getElementById("port").value, 10),
+                confirmPortChange: confirmPortChange === true
+            };
+        }
+
+        async function loadSettings() {
+            const response = await fetch("/admin/api/settings", { credentials: "include" });
+            if (!response.ok) {
+                setStatus(settingsStatus, false, "Ayarlar okunamadi. Giris bilgilerinizi kontrol edin.");
+                return;
+            }
+
+            const data = await response.json();
+
+            document.getElementById("sqlServer").value = data.sqlServer ?? "";
+            document.getElementById("database").value = data.database ?? "";
+            document.getElementById("username").value = data.username ?? "";
+            document.getElementById("password").value = data.password ?? "";
+            document.getElementById("priceQuery").value = data.priceQuery ?? "";
+            document.getElementById("port").value = data.port ?? 5080;
+            setLogoPreview(data.logoBase64, data.logoContentType);
+        }
+
+        async function saveSettings(confirmPortChange) {
+            clearStatus(settingsStatus);
+
+            const response = await fetch("/admin/api/settings", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(collectForm(confirmPortChange))
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.requiresRestartConfirmation) {
+                const confirmed = window.confirm(`Port ${data.previousPort} -> ${data.newPort} olarak degisecek. Servis yeniden baslatilsin mi?`);
+                if (confirmed) {
+                    await saveSettings(true);
+                } else {
+                    setStatus(settingsStatus, false, "Port degisikligi iptal edildi.");
+                }
+                return;
+            }
+
+            if (!response.ok) {
+                setStatus(settingsStatus, false, data.error ?? "Ayarlar kaydedilemedi.");
+                return;
+            }
+
+            setStatus(settingsStatus, true, data.message ?? "Ayarlar kaydedildi.");
+        }
+
+        document.getElementById("save-settings").addEventListener("click", async () => {
+            await saveSettings(false);
+        });
+
+        document.getElementById("test-connection").addEventListener("click", async () => {
+            clearStatus(settingsStatus);
+
+            const response = await fetch("/admin/api/test-connection", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(collectForm(false))
+            });
+
+            const data = await response.json();
+            setStatus(settingsStatus, response.ok, data.message ?? data.error ?? "Baglanti testi tamamlandi.");
+        });
+
+        document.getElementById("upload-logo").addEventListener("click", async () => {
+            clearStatus(logoStatus);
+            const fileInput = document.getElementById("logoFile");
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                setStatus(logoStatus, false, "Lutfen bir logo dosyasi secin.");
+                return;
+            }
+
+            const selectedFile = fileInput.files[0];
+            if (selectedFile.size > maxLogoSizeBytes) {
+                setStatus(logoStatus, false, "Dosya çok büyük");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", selectedFile);
+
+            const response = await fetch("/admin/api/logo", {
+                method: "POST",
+                credentials: "include",
+                body: formData
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                setStatus(logoStatus, false, data.error ?? "Logo yuklenemedi.");
+                return;
+            }
+
+            setStatus(logoStatus, true, data.message ?? "Logo guncellendi.");
+            setLogoPreview(data.logoBase64, data.logoContentType);
+            fileInput.value = "";
+        });
+
+        loadSettings();
+    </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "Port": 5080,
+  "Sql": {
+    "Server": "",
+    "Database": "",
+    "User": "",
+    "Password": ""
+  },
+  "PriceQuery": "SELECT TOP 1 Barkod, UrunAdi, Fiyat, Birim FROM dbo.Urunler WHERE Barkod = @Barkod",
+  "LogoBase64": "",
+  "LogoContentType": "",
+  "Admin": {
+    "Username": "admin",
+    "PasswordHash": ""
+  }
+}
